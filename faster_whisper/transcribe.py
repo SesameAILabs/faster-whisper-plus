@@ -109,6 +109,20 @@ class TranscriptionInfo:
     vad_options: VadOptions
 
 
+def find_numeral_symbol_tokens(tokenizer: Tokenizer):
+    numeral_symbol_tokens = []
+    for i in range(tokenizer.eot):
+        token = tokenizer.decode([i]).removeprefix(" ")
+        has_numeral_symbol = any(c in "0123456789%$£¥" for c in token)
+        if has_numeral_symbol:
+            numeral_symbol_tokens.append(i)
+    return numeral_symbol_tokens
+
+
+# The code below is originally from HF pipeline and is used in whisper-x
+# (https://github.com/m-bain/whisperX) and adapted for faster_whisper
+
+
 class BatchedInferencePipeline:
     def __init__(
         self,
@@ -281,6 +295,7 @@ class BatchedInferencePipeline:
         prefix: Optional[str] = None,
         suppress_blank: bool = True,
         suppress_tokens: Optional[List[int]] = [-1],
+        suppress_numerals: bool = False,
         without_timestamps: bool = True,
         max_initial_timestamp: float = 1.0,
         word_timestamps: bool = False,
@@ -505,7 +520,7 @@ class BatchedInferencePipeline:
             prefix=prefix,
             suppress_blank=suppress_blank,
             suppress_tokens=(
-                get_suppressed_tokens(tokenizer, suppress_tokens)
+                get_suppressed_tokens(tokenizer, suppress_tokens, suppress_numerals)
                 if suppress_tokens
                 else suppress_tokens
             ),
@@ -731,6 +746,7 @@ class WhisperModel:
         prefix: Optional[str] = None,
         suppress_blank: bool = True,
         suppress_tokens: Optional[List[int]] = [-1],
+        suppress_numerals: bool = False,
         without_timestamps: bool = False,
         max_initial_timestamp: float = 1.0,
         word_timestamps: bool = False,
@@ -944,7 +960,7 @@ class WhisperModel:
             prefix=prefix,
             suppress_blank=suppress_blank,
             suppress_tokens=(
-                get_suppressed_tokens(tokenizer, suppress_tokens)
+                get_suppressed_tokens(tokenizer, suppress_tokens, suppress_numerals)
                 if suppress_tokens
                 else suppress_tokens
             ),
@@ -1753,9 +1769,9 @@ class WhisperModel:
             languege_probability: Probability of the detected language.
             all_language_probs: List of tuples with all language names and probabilities.
         """
-        assert (
-            audio is not None or features is not None
-        ), "Either `audio` or `features` must be provided."
+        assert audio is not None or features is not None, (
+            "Either `audio` or `features` must be provided."
+        )
 
         if audio is not None:
             if vad_filter:
@@ -1841,7 +1857,8 @@ def get_compression_ratio(text: str) -> float:
 
 def get_suppressed_tokens(
     tokenizer: Tokenizer,
-    suppress_tokens: Tuple[int],
+    suppress_tokens: List[int],
+    suppress_numerals: bool = False,
 ) -> Optional[List[int]]:
     if -1 in suppress_tokens:
         suppress_tokens = [t for t in suppress_tokens if t >= 0]
@@ -1860,6 +1877,12 @@ def get_suppressed_tokens(
             tokenizer.sot_lm,
         ]
     )
+
+    # This is not present in the original faster_whisper implementation
+    # Follows the same logic as whisperx
+    if suppress_numerals:
+        numeral_symbol_tokens = find_numeral_symbol_tokens(tokenizer)
+        suppress_tokens.extend(numeral_symbol_tokens)
 
     return tuple(sorted(set(suppress_tokens)))
 
