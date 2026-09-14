@@ -108,6 +108,16 @@ class TranscriptionInfo:
     vad_options: VadOptions
 
 
+def find_numeral_symbol_tokens(tokenizer: Tokenizer):
+    numeral_symbol_tokens = []
+    for i in range(tokenizer.eot):
+        token = tokenizer.decode([i]).removeprefix(" ")
+        has_numeral_symbol = any(c in "0123456789%$£¥" for c in token)
+        if has_numeral_symbol:
+            numeral_symbol_tokens.append(i)
+    return numeral_symbol_tokens
+
+
 class BatchedInferencePipeline:
     def __init__(
         self,
@@ -280,6 +290,7 @@ class BatchedInferencePipeline:
         prefix: Optional[str] = None,
         suppress_blank: bool = True,
         suppress_tokens: Optional[List[int]] = [-1],
+        suppress_numerals: bool = False,
         without_timestamps: bool = True,
         max_initial_timestamp: float = 1.0,
         word_timestamps: bool = False,
@@ -511,7 +522,7 @@ class BatchedInferencePipeline:
             prefix=prefix,
             suppress_blank=suppress_blank,
             suppress_tokens=(
-                get_suppressed_tokens(tokenizer, suppress_tokens)
+                get_suppressed_tokens(tokenizer, suppress_tokens, suppress_numerals)
                 if suppress_tokens
                 else suppress_tokens
             ),
@@ -747,6 +758,7 @@ class WhisperModel:
         prefix: Optional[str] = None,
         suppress_blank: bool = True,
         suppress_tokens: Optional[List[int]] = [-1],
+        suppress_numerals: bool = False,
         without_timestamps: bool = False,
         max_initial_timestamp: float = 1.0,
         word_timestamps: bool = False,
@@ -960,7 +972,7 @@ class WhisperModel:
             prefix=prefix,
             suppress_blank=suppress_blank,
             suppress_tokens=(
-                get_suppressed_tokens(tokenizer, suppress_tokens)
+                get_suppressed_tokens(tokenizer, suppress_tokens, suppress_numerals)
                 if suppress_tokens
                 else suppress_tokens
             ),
@@ -1833,13 +1845,11 @@ def restore_speech_timestamps(
                 word.end = ts_map.get_original_time(word.end, chunk_index)
                 words.append(word)
 
-            segment.start = words[0].start
-            segment.end = words[-1].end
             segment.words = words
 
-        else:
-            segment.start = ts_map.get_original_time(segment.start)
-            segment.end = ts_map.get_original_time(segment.end, is_end=True)
+        # Keep the caller's segment extent, which may include speech without aligned words.
+        segment.start = ts_map.get_original_time(segment.start)
+        segment.end = ts_map.get_original_time(segment.end, is_end=True)
 
         yield segment
 
@@ -1858,6 +1868,7 @@ def get_compression_ratio(text: str) -> float:
 def get_suppressed_tokens(
     tokenizer: Tokenizer,
     suppress_tokens: Tuple[int],
+    suppress_numerals: bool = False,
 ) -> Optional[List[int]]:
     if -1 in suppress_tokens:
         suppress_tokens = [t for t in suppress_tokens if t >= 0]
@@ -1876,6 +1887,9 @@ def get_suppressed_tokens(
             tokenizer.sot_lm,
         ]
     )
+
+    if suppress_numerals:
+        suppress_tokens.extend(find_numeral_symbol_tokens(tokenizer))
 
     return tuple(sorted(set(suppress_tokens)))
 

@@ -4,6 +4,27 @@ import os
 import numpy as np
 
 from faster_whisper import BatchedInferencePipeline, WhisperModel, decode_audio
+from faster_whisper.transcribe import Segment, Word, restore_speech_timestamps
+
+
+def test_restore_speech_timestamps_preserves_segment_extent():
+    segment = Segment(
+        id=0,
+        seek=0,
+        start=0.0,
+        end=2.0,
+        text="hello",
+        tokens=[],
+        avg_logprob=0.0,
+        compression_ratio=1.0,
+        no_speech_prob=0.0,
+        words=[Word(0.25, 0.5, "hello", 1.0)],
+        temperature=0.0,
+    )
+    chunks = [{"start": 16000, "end": 32000}, {"start": 64000, "end": 80000}]
+    (restored,) = restore_speech_timestamps([segment], chunks, sampling_rate=16000)
+    assert (restored.start, restored.end) == (1.0, 5.0)
+    assert (restored.words[0].start, restored.words[0].end) == (1.25, 1.5)
 
 
 def test_supported_languages():
